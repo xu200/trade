@@ -1,12 +1,14 @@
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
+const swaggerUi = require('swagger-ui-express');
 require('dotenv').config();
 
 const sequelize = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const syncService = require('./services/syncService');
+const swaggerSpec = require('./config/swagger');
 
 const app = express();
 
@@ -15,6 +17,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
+
+// Swagger API 文档
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: '供应链金融平台 API 文档'
+}));
 
 // 路由
 app.use('/api', routes);
@@ -55,7 +63,8 @@ const startServer = async () => {
     // 启动服务器
     app.listen(PORT, () => {
       console.log(`🚀 服务器运行在 http://localhost:${PORT}`);
-      console.log(`📚 API文档: http://localhost:${PORT}/api`);
+      console.log(`📚 API文档: http://localhost:${PORT}/api-docs`);
+      console.log(`💚 健康检查: http://localhost:${PORT}/health`);
     });
   } catch (error) {
     console.error('❌ 服务器启动失败:', error);

@@ -215,6 +215,12 @@ cp .env.example .env
 npm run dev
 ```
 
+**访问 API 文档**：
+- Swagger UI: http://localhost:5000/api-docs
+- 健康检查: http://localhost:5000/health
+
+详细使用说明请查看 [backend/SWAGGER_GUIDE.md](backend/SWAGGER_GUIDE.md)
+
 ### 5. 前端启动
 
 ```bash

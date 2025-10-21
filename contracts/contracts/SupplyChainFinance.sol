@@ -41,12 +41,15 @@ contract SupplyChainFinance {
     // 状态变量
     mapping(address => UserRole) public userRoles;
     mapping(address => string) public userNames;
-    
+    // 应收账款计数器
     uint256 public receivableCounter;
+    // 应收账款映射
     mapping(uint256 => Receivable) public receivables;
-    
+    // 融资申请计数器
     uint256 public financeApplicationCounter;
+    // 融资申请映射
     mapping(uint256 => FinanceApplication) public financeApplications;
+    // 应收账款到融资申请的映射
     mapping(uint256 => uint256[]) public receivableToApplications;
 
     // 事件

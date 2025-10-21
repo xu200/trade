@@ -30,12 +30,13 @@ class FinanceController {
         });
       }
 
-      // 调用智能合约
+      // 调用智能合约（使用申请人的地址）
       const receipt = await contractService.applyForFinance(
         receivableId,
         financier,
         financeAmount,
-        interestRate
+        interestRate,
+        userAddress  // 传入申请人地址
       );
 
       // 从事件中获取申请ID
@@ -90,7 +91,7 @@ class FinanceController {
   async approve(req, res, next) {
     try {
       const { id } = req.params;
-      const { approved } = req.body;
+      const { approve } = req.body;  // 改为 approve，与 Swagger 文档一致
       const userAddress = req.user.address;
 
       // 检查融资申请
@@ -119,18 +120,18 @@ class FinanceController {
         });
       }
 
-      // 调用智能合约
-      const receipt = await contractService.approveFinanceApplication(id, approved);
+      // 调用智能合约（使用金融机构的地址）
+      const receipt = await contractService.approveFinanceApplication(id, approve, userAddress);
 
       // 更新数据库
       await application.update({
-        approved: approved,
+        approved: approve,
         processed: true,
         tx_hash: receipt.hash
       });
 
       // 如果批准，更新应收账款状态
-      if (approved) {
+      if (approve) {
         await ReceivableIndex.update(
           { financed: true },
           { where: { receivable_id: application.receivable_id } }
@@ -155,9 +156,9 @@ class FinanceController {
         data: {
           applicationId: id,
           txHash: receipt.hash,
-          approved: approved
+          approved: approve
         },
-        message: approved ? '融资已批准' : '融资已拒绝'
+        message: approve ? '融资已批准' : '融资已拒绝'
       });
     } catch (error) {
       next(error);

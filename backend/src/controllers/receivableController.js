@@ -31,13 +31,14 @@ class ReceivableController {
         });
       }
 
-      // 调用智能合约
+      // 调用智能合约（使用当前用户的地址）
       const receipt = await contractService.createReceivable(
         supplier,
         amount,
         dueTime,
         description,
-        contractNumber
+        contractNumber,
+        issuerAddress  // 传入发行人地址
       );
 
       // 从事件中获取应收账款ID
@@ -124,8 +125,8 @@ class ReceivableController {
         });
       }
 
-      // 调用智能合约
-      const receipt = await contractService.confirmReceivable(id);
+      // 调用智能合约（使用当前持有人的地址）
+      const receipt = await contractService.confirmReceivable(id, userAddress);
 
       // 更新数据库
       await receivable.update({
@@ -184,8 +185,8 @@ class ReceivableController {
         });
       }
 
-      // 调用智能合约
-      const receipt = await contractService.transferReceivable(id, newOwner);
+      // 调用智能合约（使用当前持有人的地址）
+      const receipt = await contractService.transferReceivable(id, newOwner, userAddress);
 
       // 更新数据库
       await receivable.update({
