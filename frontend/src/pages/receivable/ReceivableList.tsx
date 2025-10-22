@@ -17,7 +17,7 @@ function ReceivableList() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<number | string>('');
   const [searchText, setSearchText] = useState('');
 
   useEffect(() => {
@@ -30,8 +30,7 @@ function ReceivableList() {
       const result = await receivableService.getReceivables({
         page,
         limit: pageSize,
-        status: statusFilter as 'confirmed' | 'unconfirmed' | 'financed' | 'settled' | undefined,
-        search: searchText || undefined,
+        status: (typeof statusFilter === 'number' ? statusFilter : undefined) as 0 | 1 | 2 | 3 | undefined,
       });
       setReceivables(result.items);
       setTotal(result.total);
@@ -48,29 +47,27 @@ function ReceivableList() {
   };
 
   const getStatusTag = (record: Receivable) => {
-    if (record.financed) {
-      return <Tag color="success">已融资</Tag>;
-    }
-    if (record.settled) {
-      return <Tag color="default">已结算</Tag>;
-    }
-    if (record.confirmed) {
-      return <Tag color="processing">已确认</Tag>;
-    }
-    return <Tag color="warning">待确认</Tag>;
+    const statusMap: Record<number, { color: string; text: string }> = {
+      0: { color: 'warning', text: '待确认' },
+      1: { color: 'processing', text: '已确认' },
+      2: { color: 'blue', text: '已转让' },
+      3: { color: 'success', text: '已融资' },
+    };
+    const config = statusMap[record.status] || { color: 'default', text: '未知' };
+    return <Tag color={config.color}>{config.text}</Tag>;
   };
 
   const columns = [
     {
       title: 'ID',
-      dataIndex: 'receivable_id',
-      key: 'receivable_id',
+      dataIndex: 'receivableId',
+      key: 'receivableId',
       width: 80,
     },
     {
       title: '合同编号',
-      dataIndex: 'contract_number',
-      key: 'contract_number',
+      dataIndex: 'contractNumber',
+      key: 'contractNumber',
       width: 150,
     },
     {
@@ -81,20 +78,20 @@ function ReceivableList() {
     },
     {
       title: '发行方',
-      dataIndex: 'issuer_address',
-      key: 'issuer_address',
+      dataIndex: 'issuer',
+      key: 'issuer',
       render: (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`,
     },
     {
       title: '持有人',
-      dataIndex: 'owner_address',
-      key: 'owner_address',
+      dataIndex: 'currentOwner',
+      key: 'currentOwner',
       render: (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`,
     },
     {
       title: '到期日期',
-      dataIndex: 'due_time',
-      key: 'due_time',
+      dataIndex: 'dueTime',
+      key: 'dueTime',
     },
     {
       title: '状态',
@@ -111,17 +108,18 @@ function ReceivableList() {
             type="link"
             size="small"
             icon={<EyeOutlined />}
-            onClick={() => navigate(`/receivable/${record.receivable_id}`)}
+            onClick={() => navigate(`/receivable/${record.receivableId}`)}
           >
             详情
           </Button>
           {/* 只有供应商且是持有人才能确认和转让 */}
-          {!record.confirmed && 
+          {record.status === 0 && 
            user && 
            user.role && 
            user.role.toLowerCase().replace(/_/g, '') === 'supplier' &&
            user.walletAddress &&
-           record.owner_address.toLowerCase() === user.walletAddress.toLowerCase() && (
+           record.currentOwner &&
+           record.currentOwner.toLowerCase() === user.walletAddress.toLowerCase() && (
             <Button
               type="link"
               size="small"
@@ -131,13 +129,13 @@ function ReceivableList() {
               确认
             </Button>
           )}
-          {record.confirmed && 
-           !record.financed && 
+          {record.status === 1 && 
            user && 
            user.role && 
            user.role.toLowerCase().replace(/_/g, '') === 'supplier' &&
            user.walletAddress &&
-           record.owner_address.toLowerCase() === user.walletAddress.toLowerCase() && (
+           record.currentOwner &&
+           record.currentOwner.toLowerCase() === user.walletAddress.toLowerCase() && (
             <Button
               type="link"
               size="small"
@@ -183,10 +181,10 @@ function ReceivableList() {
               }}
             >
               <Option value="">全部</Option>
-              <Option value="unconfirmed">待确认</Option>
-              <Option value="confirmed">已确认</Option>
-              <Option value="financed">已融资</Option>
-              <Option value="settled">已结算</Option>
+              <Option value={0}>待确认</Option>
+              <Option value={1}>已确认</Option>
+              <Option value={2}>已转让</Option>
+              <Option value={3}>已融资</Option>
             </Select>
             <Button onClick={fetchReceivables}>刷新</Button>
           </Space>

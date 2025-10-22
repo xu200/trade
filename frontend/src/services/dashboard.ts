@@ -26,7 +26,7 @@ class DashboardService {
       const response = await axios.get(`${this.baseURL}/dashboard/stats`, {
         headers: this.getHeaders(),
       });
-      
+      //查看response.data的值
       if (response.data.success) {
         return response.data.data;
       }

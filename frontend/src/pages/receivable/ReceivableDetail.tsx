@@ -44,16 +44,14 @@ function ReceivableDetail() {
   };
 
   const getStatusTag = (record: Receivable) => {
-    if (record.financed) {
-      return <Tag color="success">已融资</Tag>;
-    }
-    if (record.settled) {
-      return <Tag color="default">已结算</Tag>;
-    }
-    if (record.confirmed) {
-      return <Tag color="processing">已确认</Tag>;
-    }
-    return <Tag color="warning">待确认</Tag>;
+    const statusMap: Record<number, { color: string; text: string }> = {
+      0: { color: 'warning', text: '待确认' },
+      1: { color: 'processing', text: '已确认' },
+      2: { color: 'blue', text: '已转让' },
+      3: { color: 'success', text: '已融资' },
+    };
+    const config = statusMap[record.status] || { color: 'default', text: '未知' };
+    return <Tag color={config.color}>{config.text}</Tag>;
   };
 
   if (loading) {
@@ -88,10 +86,10 @@ function ReceivableDetail() {
         <Card title="应收账款详情">
           <Descriptions bordered column={2}>
             <Descriptions.Item label="应收账款ID">
-              {receivable.receivable_id || '-'}
+              {receivable.receivableId || '-'}
             </Descriptions.Item>
             <Descriptions.Item label="合同编号">
-              {receivable.contract_number || '-'}
+              {receivable.contractNumber || '-'}
             </Descriptions.Item>
             <Descriptions.Item label="金额">
               {receivable.amount ? `¥${parseFloat(receivable.amount).toLocaleString()}` : '-'}
@@ -100,16 +98,13 @@ function ReceivableDetail() {
               {getStatusTag(receivable)}
             </Descriptions.Item>
             <Descriptions.Item label="发行方地址">
-              {receivable.issuer_address || '-'}
+              {receivable.issuer || '-'}
             </Descriptions.Item>
             <Descriptions.Item label="当前持有人">
-              {receivable.owner_address || '-'}
+              {receivable.currentOwner || '-'}
             </Descriptions.Item>
             <Descriptions.Item label="到期日期">
-              {receivable.due_time || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="创建时间">
-              {receivable.created_at || '-'}
+              {receivable.dueTime || '-'}
             </Descriptions.Item>
             <Descriptions.Item label="描述" span={2}>
               {receivable.description || '无'}
@@ -120,23 +115,22 @@ function ReceivableDetail() {
         <Card title="操作">
           <Space wrap>
             {/* 供应商才能确认账款，并且必须是自己持有的 */}
-            {!receivable.confirmed && 
+            {receivable.status === 0 && 
              user && 
-             receivable.owner_address &&
+             receivable.currentOwner &&
              isRole(user.role, 'Supplier') && 
-             receivable.owner_address.toLowerCase() === user.walletAddress.toLowerCase() && (
+             receivable.currentOwner.toLowerCase() === user.walletAddress.toLowerCase() && (
               <Button type="primary" onClick={() => navigate('/receivable/confirm')}>
                 确认账款
               </Button>
             )}
             
             {/* 供应商可以转让和申请融资，必须是已确认且未融资 */}
-            {receivable.confirmed && 
-             !receivable.financed && 
+            {receivable.status === 1 && 
              user &&
-             receivable.owner_address &&
+             receivable.currentOwner &&
              isRole(user.role, 'Supplier') &&
-             receivable.owner_address.toLowerCase() === user.walletAddress.toLowerCase() && (
+             receivable.currentOwner.toLowerCase() === user.walletAddress.toLowerCase() && (
               <>
                 <Button onClick={() => navigate('/receivable/transfer')}>
                   转让账款

@@ -3,25 +3,18 @@ import { message } from 'antd';
 import { API_BASE_URL } from '@/config/constants';
 import { getToken } from '@/utils/storage';
 
-// 应收账款类型（严格匹配后端数据库字段）
+// 应收账款类型（严格匹配后端Swagger API返回）
 export interface Receivable {
   id: number;
-  receivable_id: number;
-  issuer_address: string;
-  owner_address: string;
-  supplier_address: string;
+  receivableId: number;
+  issuer: string;
+  currentOwner: string;
   amount: string;
-  contract_number: string | null;
+  dueTime: string;
   description: string | null;
-  create_time: string | null;
-  due_time: string | null;
-  confirmed: boolean;
-  financed: boolean;
-  settled: boolean;
-  tx_hash: string | null;
-  block_number: number | null;
-  created_at: string;
-  updated_at: string;
+  contractNumber: string | null;
+  isConfirmed: boolean;
+  status: number; // 0-待确认, 1-已确认, 2-已转让, 3-已融资
 }
 
 class ReceivableService {
@@ -35,14 +28,12 @@ class ReceivableService {
     };
   }
 
-  // 获取应收账款列表
+  // 获取应收账款列表（匹配后端Swagger参数）
   async getReceivables(params?: {
     page?: number;
     limit?: number;
-    status?: 'confirmed' | 'unconfirmed' | 'financed' | 'settled';
-    owner?: string;
-    issuer?: string;
-    search?: string;
+    type?: 'owned' | 'issued' | 'all'; // owned-我拥有的, issued-我发行的, all-全部
+    status?: 0 | 1 | 2 | 3; // 0-待确认, 1-已确认, 2-已转让, 3-已融资
   }): Promise<{ items: Receivable[]; total: number; page: number; pageSize: number }> {
     try {
       const response = await axios.get(`${this.baseURL}/receivables`, {
@@ -52,10 +43,10 @@ class ReceivableService {
       
       if (response.data.success) {
         return {
-          items: response.data.data.items || [],
-          total: response.data.data.total || 0,
-          page: response.data.data.page || 1,
-          pageSize: response.data.data.pageSize || 10,
+          items: response.data.data || [],
+          total: response.data.data.length || 0,
+          page: params?.page || 1,
+          pageSize: params?.limit || 10,
         };
       }
       
@@ -92,7 +83,28 @@ class ReceivableService {
     }
   }
 
-  // 确认应收账款
+  // 转让应收账款（核心企业转让给其他用户）
+  async transferReceivable(id: number, newOwner: string): Promise<any> {
+    try {
+      const response = await axios.post(
+        `${this.baseURL}/receivables/${id}/transfer`,
+        { newOwner },
+        { headers: this.getHeaders() }
+      );
+      
+      if (response.data.success) {
+        message.success('应收账款转让成功');
+        return response.data.data;
+      }
+      
+      throw new Error(response.data.message || '转让失败');
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '转让应收账款失败');
+      throw error;
+    }
+  }
+
+  // 供应商确认应收账款
   async confirmReceivable(id: number): Promise<any> {
     try {
       const response = await axios.post(
@@ -109,27 +121,6 @@ class ReceivableService {
       throw new Error(response.data.message || '确认失败');
     } catch (error: any) {
       message.error(error.response?.data?.message || '确认应收账款失败');
-      throw error;
-    }
-  }
-
-  // 转让应收账款（匹配后端参数：newOwner）
-  async transferReceivable(id: number, newOwner: string): Promise<any> {
-    try {
-      const response = await axios.post(
-        `${this.baseURL}/receivables/${id}/transfer`,
-        { newOwner },  // 后端期望 newOwner，不是 newOwnerAddress
-        { headers: this.getHeaders() }
-      );
-      
-      if (response.data.success) {
-        message.success('应收账款转让成功');
-        return response.data.data;
-      }
-      
-      throw new Error(response.data.message || '转让失败');
-    } catch (error: any) {
-      message.error(error.response?.data?.message || '转让应收账款失败');
       throw error;
     }
   }

@@ -42,12 +42,12 @@ class FinanceService {
     }
   }
 
-  // 申请融资
+  // 申请融资（匹配后端参数）
   async applyForFinance(data: {
     receivableId: number;
-    financierAddress: string;
-    applyAmount: string;
-    terms?: string;
+    financier: string;
+    financeAmount: number;
+    interestRate: number;
   }): Promise<any> {
     const response = await axios.post(`${this.baseURL}/finance/apply`, data, {
       headers: this.getHeaders(),
@@ -56,22 +56,30 @@ class FinanceService {
     return response.data.data;
   }
 
-  // 批准融资
-  async approveFinance(id: number): Promise<any> {
-    const response = await axios.post(`${this.baseURL}/finance/${id}/approve`, {}, {
-      headers: this.getHeaders(),
-    });
-    message.success('融资申请已批准');
+  // 批准或拒绝融资（统一接口）
+  async approveOrRejectFinance(id: number, approve: boolean, reason?: string): Promise<any> {
+    const response = await axios.post(
+      `${this.baseURL}/finance/${id}/approve`,
+      {
+        approve,
+        reason: reason || (approve ? '审批通过' : '审批未通过'),
+      },
+      {
+        headers: this.getHeaders(),
+      }
+    );
+    message.success(approve ? '融资申请已批准' : '融资申请已拒绝');
     return response.data.data;
   }
 
-  // 拒绝融资
-  async rejectFinance(id: number): Promise<any> {
-    const response = await axios.post(`${this.baseURL}/finance/${id}/reject`, {}, {
-      headers: this.getHeaders(),
-    });
-    message.success('融资申请已拒绝');
-    return response.data.data;
+  // 批准融资（快捷方法）
+  async approveFinance(id: number, reason?: string): Promise<any> {
+    return this.approveOrRejectFinance(id, true, reason);
+  }
+
+  // 拒绝融资（快捷方法）
+  async rejectFinance(id: number, reason?: string): Promise<any> {
+    return this.approveOrRejectFinance(id, false, reason);
   }
 }
 

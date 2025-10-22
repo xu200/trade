@@ -81,12 +81,14 @@ class ApiService {
   // 用户登录
   async login(data: LoginRequest): Promise<LoginResponse> {
     const response = await this.axiosInstance.post<ApiResponse<LoginResponse>>('/auth/login', data);
+    console.log(response.data);
     return response.data.data as LoginResponse;
   }
 
   // 获取当前用户信息
   async getMe(): Promise<UserInfo> {
     const response = await this.axiosInstance.get<ApiResponse<UserInfo>>('/auth/me');
+    console.log(response.data);
     return response.data.data as UserInfo;
   }
 }

@@ -33,4 +33,4 @@ export const JWT_TOKEN_KEY = 'scf_jwt_token';
 export const USER_INFO_KEY = 'scf_user_info';
 
 // MetaMask 签名消息模板
-export const SIGN_MESSAGE_TEMPLATE = "Welcome to Supply Chain Finance DApp! Sign this message to log in. Nonce: ";
+export const SIGN_MESSAGE_TEMPLATE = "欢迎使用供应链金融 DApp！请签名并登录。Nonce：";
