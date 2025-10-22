@@ -2,6 +2,7 @@ const contractService = require('../services/contractService');
 const FinanceAppIndex = require('../models/FinanceAppIndex');
 const ReceivableIndex = require('../models/ReceivableIndex');
 const TransactionHistory = require('../models/TransactionHistory');
+const FieldMapper = require('../utils/fieldMapper');
 const { ethers } = require('ethers');
 
 class FinanceController {
@@ -121,7 +122,13 @@ class FinanceController {
       }
 
       // 调用智能合约（使用金融机构的地址）
-      const receipt = await contractService.approveFinanceApplication(id, approve, userAddress);
+      // ⭐ 如果批准，传递融资金额用于转账ETH
+      const receipt = await contractService.approveFinanceApplication(
+        id, 
+        approve, 
+        userAddress,
+        approve ? application.finance_amount : '0'  // 批准时传递金额，拒绝时传0
+      );
 
       // 更新数据库
       await application.update({
@@ -220,6 +227,89 @@ class FinanceController {
         }
       });
     } catch (error) {
+      next(error);
+    }
+  }
+
+  // 同步链上融资交易到数据库
+  async sync(req, res, next) {
+    try {
+      const { applicationId, txHash, action, amount } = req.body;
+      
+      console.log('🔄 同步融资交易:', { applicationId, txHash, action });
+      
+      // 1. 从链上获取交易详情验证
+      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'http://127.0.0.1:8545');
+      const receipt = await provider.getTransactionReceipt(txHash);
+      
+      if (!receipt || receipt.status !== 1) {
+        return res.status(400).json({
+          success: false,
+          message: '交易失败或未确认'
+        });
+      }
+      
+      // 2. 更新数据库
+      const application = await FinanceAppIndex.findOne({
+        where: { application_id: applicationId }
+      });
+      
+      if (!application) {
+        return res.status(404).json({
+          success: false,
+          message: '融资申请不存在'
+        });
+      }
+      
+      if (action === 'approve') {
+        // 批准：更新融资申请和应收账款
+        await application.update({ 
+          approved: true,
+          processed: true,
+          approve_time: new Date()
+        });
+        
+        // 更新应收账款为已融资
+        const receivable = await ReceivableIndex.findOne({
+          where: { receivable_id: application.receivable_id }
+        });
+        
+        if (receivable) {
+          await receivable.update({ 
+            financed: true,
+            owner_address: application.financier_address  // 金融机构成为新持有人
+          });
+        }
+        
+        console.log('✅ 已更新为已批准，持有人变更为金融机构');
+      } else if (action === 'reject') {
+        await application.update({ 
+          approved: false,
+          processed: true,
+          approve_time: new Date()
+        });
+        console.log('✅ 已更新为已拒绝');
+      }
+      
+      // 3. 记录交易历史
+      await TransactionHistory.create({
+        tx_hash: txHash,
+        from_address: receipt.from,
+        to_address: receipt.to,
+        tx_type: action === 'approve' ? 'approve_finance' : 'reject_finance',
+        related_id: applicationId,
+        block_number: receipt.blockNumber,
+        gas_used: receipt.gasUsed ? receipt.gasUsed.toString() : '0',
+        timestamp: new Date(),
+        status: 'success'
+      });
+      
+      res.json({
+        success: true,
+        message: '同步成功'
+      });
+    } catch (error) {
+      console.error('❌ 同步失败:', error);
       next(error);
     }
   }

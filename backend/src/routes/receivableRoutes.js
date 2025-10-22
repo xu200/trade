@@ -82,6 +82,49 @@ router.get('/', authenticate, receivableController.list);
 
 /**
  * @swagger
+ * /api/receivables/sync:
+ *   post:
+ *     summary: 同步链上交易到数据库
+ *     tags: [应收账款管理]
+ *     description: 前端MetaMask交易完成后，通知后端同步状态
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - receivableId
+ *               - txHash
+ *               - action
+ *             properties:
+ *               receivableId:
+ *                 type: integer
+ *                 description: 应收账款ID
+ *                 example: 1
+ *               txHash:
+ *                 type: string
+ *                 description: 交易哈希
+ *                 example: "0x1234..."
+ *               action:
+ *                 type: string
+ *                 enum: [confirm, transfer]
+ *                 description: 操作类型
+ *                 example: "confirm"
+ *               newOwner:
+ *                 type: string
+ *                 description: 新持有人地址（仅转让时需要）
+ *                 example: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+ *     responses:
+ *       200:
+ *         description: 同步成功
+ */
+router.post('/sync', authenticate, receivableController.sync);
+
+/**
+ * @swagger
  * /api/receivables/{id}:
  *   get:
  *     summary: 获取应收账款详情

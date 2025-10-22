@@ -94,16 +94,17 @@ contract SupplyChainFinance {
         return userRoles[_user];
     }
 
-    // 创建应收账款
+    // 创建应收账款 (核心企业锁定ETH)
     function createReceivable(
         address _supplier,
         uint256 _amount,
         uint256 _dueTime,
         string memory _description,
         string memory _contractNumber
-    ) external onlyCoreCompany returns (uint256) {
+    ) external payable onlyCoreCompany returns (uint256) {
         require(_supplier != address(0), "Invalid supplier address");
         require(_amount > 0, "Amount must be positive");
+        require(msg.value == _amount, "Must lock exact amount");  // ⭐ 核心企业必须锁定ETH
         require(_dueTime > block.timestamp, "Due time must be in future");
         
         receivableCounter++;
@@ -114,7 +115,7 @@ contract SupplyChainFinance {
             issuer: msg.sender,
             owner: _supplier,
             supplier: _supplier,
-            amount: _amount,
+            amount: msg.value,  // 使用实际转入的ETH
             createTime: block.timestamp,
             dueTime: _dueTime,
             confirmed: false,
@@ -124,7 +125,7 @@ contract SupplyChainFinance {
             contractNumber: _contractNumber
         });
         
-        emit ReceivableCreated(newId, msg.sender, _supplier, _amount);
+        emit ReceivableCreated(newId, msg.sender, _supplier, msg.value);
         
         return newId;
     }
@@ -195,34 +196,74 @@ contract SupplyChainFinance {
         return appId;
     }
 
-    // 审批融资申请
-    function approveFinanceApplication(uint256 _appId, bool _approve) external {
+    // 审批融资申请 (金融机构批准时转账ETH给供应商)
+    function approveFinanceApplication(uint256 _appId, bool _approve) external payable {
         FinanceApplication storage app = financeApplications[_appId];
         
         require(app.financier == msg.sender, "Not the assigned financier");
         require(!app.processed, "Already processed");
         
-        app.approved = _approve;
-        app.processed = true;
-        
         if (_approve) {
+            require(msg.value == app.financeAmount, "Incorrect ETH amount");  // ⭐ 必须转账融资金额
+            
             Receivable storage rec = receivables[app.receivableId];
+            
+            // 转账ETH给供应商(申请人)
+            payable(app.applicant).transfer(msg.value);
+            
+            // 更新状态
+            app.approved = true;
+            app.processed = true;
             rec.financed = true;
+            rec.owner = msg.sender;  // ⭐ 金融机构成为新持有人
             
             emit FinanceApproved(_appId, app.receivableId);
         } else {
+            app.approved = false;
+            app.processed = true;
+            
             emit FinanceRejected(_appId, app.receivableId);
         }
     }
 
-    // 结算应收账款
-    function settleReceivable(uint256 _id) external onlyCoreCompany {
+    // 结算应收账款 (核心企业支付本金+利息给金融机构/供应商)
+    function settleReceivable(uint256 _id) external payable onlyCoreCompany {
         Receivable storage rec = receivables[_id];
         
         require(rec.id != 0, "Receivable does not exist");
         require(rec.issuer == msg.sender, "Not the issuer");
         require(rec.confirmed, "Not confirmed yet");
         require(!rec.settled, "Already settled");
+        require(block.timestamp >= rec.dueTime, "Not due yet");
+        
+        uint256 paymentAmount = rec.amount;  // 默认支付原始金额
+        
+        // 如果已融资，计算利息
+        if (rec.financed) {
+            // 查找对应的融资申请
+            uint256[] memory appIds = receivableToApplications[_id];
+            for (uint256 i = 0; i < appIds.length; i++) {
+                FinanceApplication storage app = financeApplications[appIds[i]];
+                if (app.approved && app.processed) {
+                    // 计算利息
+                    uint256 timeElapsed = block.timestamp - app.applyTime;
+                    uint256 daysElapsed = timeElapsed / 1 days;
+                    
+                    // 利息 = 融资金额 * 年化利率 * 天数 / 365 / 10000
+                    // interestRate 是基点 (1% = 100, 10% = 1000)
+                    uint256 interest = (app.financeAmount * app.interestRate * daysElapsed) / (365 * 10000);
+                    paymentAmount = rec.amount + interest;  // ⭐ 本金 + 利息
+                    break;
+                }
+            }
+            
+            require(msg.value == paymentAmount, "Incorrect payment amount");
+        } else {
+            require(msg.value == rec.amount, "Incorrect payment amount");
+        }
+        
+        // 转账给当前持有人 (金融机构或供应商)
+        payable(rec.owner).transfer(msg.value);
         
         rec.settled = true;
         

@@ -22,7 +22,7 @@ class ContractService {
     ];
 
     this.provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'http://127.0.0.1:8545');
-    this.contractAddress = process.env.CONTRACT_ADDRESS || '0x5FbDB2315678afecb367f032d93F642f64180aa3';
+    this.contractAddress = process.env.CONTRACT_ADDRESS || '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0';
     
     // 合约 ABI 将在部署后从文件加载
     try {
@@ -94,8 +94,18 @@ class ContractService {
 
   // 创建应收账款
   async createReceivable(supplier, amount, dueTime, description, contractNumber, issuerAddress) {
-    const amountWei = ethers.parseEther(amount.toString());
+    // ✅ amount 已经是 Wei 字符串，直接转为 BigInt
+    const amountWei = BigInt(amount);
+    
+    // ✅ dueTime 是 ISO 字符串，转为 Unix 秒级时间戳
     const dueTimestamp = Math.floor(new Date(dueTime).getTime() / 1000);
+
+    console.log('📤 合约服务调用参数:', {
+      supplier,
+      amount: amount + ' Wei -> BigInt',
+      dueTimestamp: dueTimestamp + ' (Unix秒)',
+      contractNumber
+    });
 
     // 使用发行人的地址调用合约
     const issuerContract = this.getContractForAddress(issuerAddress);
@@ -103,8 +113,9 @@ class ContractService {
       supplier,
       amountWei,
       dueTimestamp,
-      description,
-      contractNumber
+      description || '',
+      contractNumber,
+      { value: amountWei }  // ⭐ 核心企业必须锁定ETH
     );
 
     return await tx.wait();
@@ -128,7 +139,15 @@ class ContractService {
 
   // 申请融资
   async applyForFinance(receivableId, financier, financeAmount, interestRate, applicantAddress) {
-    const amountWei = ethers.parseEther(financeAmount.toString());
+    // ✅ financeAmount 已经是 Wei 字符串，直接转为 BigInt
+    const amountWei = BigInt(financeAmount);
+
+    console.log('📤 合约服务申请融资:', {
+      receivableId,
+      financier,
+      financeAmount: financeAmount + ' Wei',
+      interestRate
+    });
 
     // 使用申请人的地址调用合约
     const applicantContract = this.getContractForAddress(applicantAddress);
@@ -143,10 +162,26 @@ class ContractService {
   }
 
   // 审批融资申请
-  async approveFinanceApplication(appId, approve, financierAddress) {
+  async approveFinanceApplication(appId, approve, financierAddress, financeAmount = '0') {
     // 使用金融机构的地址调用合约
     const financierContract = this.getContractForAddress(financierAddress);
-    const tx = await financierContract.approveFinanceApplication(appId, approve);
+    
+    const amountWei = BigInt(financeAmount);
+    
+    console.log('💰 批准融资申请:', {
+      appId,
+      approve,
+      financeAmount: financeAmount + ' Wei',
+      willTransfer: approve ? 'YES' : 'NO'
+    });
+    
+    // ⭐ 批准时需要转账ETH给供应商
+    const tx = await financierContract.approveFinanceApplication(
+      appId, 
+      approve,
+      approve ? { value: amountWei } : {}  // 批准时转账，拒绝时不转账
+    );
+    
     return await tx.wait();
   }
 

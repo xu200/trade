@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { Card, Form, Input, DatePicker, Button, Space, Typography, message } from 'antd';
+import { Card, Form, Input, DatePicker, Button, Space, Typography, message, Modal, App } from 'antd';
 import { useNavigate } from 'react-router-dom';
+import { ethers } from 'ethers';
 import receivableService from '@/services/receivable';
+import contractService from '@/services/contract';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -11,26 +13,108 @@ function CreateReceivable() {
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const { modal } = App.useApp();
 
   const handleSubmit = async (values: any) => {
-    setLoading(true);
-    try {
-      await receivableService.createReceivable({
-        supplier: values.supplier,  // 匹配后端字段
-        amount: values.amount,
-        dueTime: values.dueTime.format('YYYY-MM-DD'),  // 匹配后端字段
-        description: values.description,
-        contractNumber: values.contractNumber,  // 必填字段
-      });
-      form.resetFields();
-      message.success('应收账款创建成功');
-      setTimeout(() => navigate('/dashboard'), 1500);
-    } catch (error: any) {
-      // 错误已在 service 中处理
-      console.error(error);
-    } finally {
-      setLoading(false);
+    console.log('🚀 表单提交，接收到的值:', values);
+    
+    // 验证金额
+    const amountNum = parseFloat(values.amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      message.error('请输入有效的金额');
+      return;
     }
+
+    // 验证地址
+    if (!ethers.isAddress(values.supplier)) {
+      message.error('无效的供应商地址');
+      return;
+    }
+
+    // 转换金额为Wei（字符串）
+    const amountInWei = ethers.parseEther(values.amount.toString()).toString();
+    
+    // 转换日期为Unix时间戳（秒）
+    const dueTimestamp = Math.floor(values.dueTime.valueOf() / 1000);
+
+    const ethAmount = values.amount;
+
+    console.log('💡 准备显示确认弹窗...', {
+      amountInWei,
+      dueTimestamp,
+      ethAmount,
+      supplier: values.supplier
+    });
+
+    modal.confirm({
+      title: '⛓️ 创建应收账款 (MetaMask签名+锁定ETH)',
+      content: (
+        <div>
+          <p>确定要创建这笔应收账款吗？</p>
+          <p style={{ fontSize: '16px', fontWeight: 'bold', color: '#1890ff' }}>
+            锁定金额: {ethAmount} ETH
+          </p>
+          <p style={{ color: '#666', fontSize: '12px' }}>
+            ⚠️ 创建后将通过MetaMask锁定 <strong>{ethAmount} ETH</strong> 到智能合约
+          </p>
+          <p style={{ color: '#666', fontSize: '12px' }}>
+            💡 这些ETH将在到期时支付给应收账款持有人
+          </p>
+          <p style={{ marginTop: '8px' }}>
+            供应商: {values.supplier.slice(0, 8)}...{values.supplier.slice(-6)}
+          </p>
+          <p>合同编号: {values.contractNumber}</p>
+        </div>
+      ),
+      okText: '确认创建并锁定ETH',
+      cancelText: '取消',
+      width: 500,
+      onOk: async () => {
+        console.log('✅ 用户点击了确认按钮');
+        setLoading(true);
+        try {
+          console.log('⛓️ 开始MetaMask创建+锁定ETH流程...');
+          console.log('📤 调用参数:', {
+            supplier: values.supplier,
+            amount: amountInWei,
+            dueTimestamp,
+            description: values.description || '',
+            contractNumber: values.contractNumber
+          });
+          
+          // 1. 调用MetaMask签名并锁定ETH
+          const { txHash } = await contractService.createReceivable(
+            values.supplier,
+            amountInWei,  // Wei字符串
+            dueTimestamp,
+            values.description || '',
+            values.contractNumber
+          );
+          
+          console.log('✅ 交易已上链:', txHash);
+          message.success(`已锁定 ${ethAmount} ETH，正在同步到后端...`);
+          
+          // 2. 通知后端同步（暂时使用原有API创建数据库记录）
+          const dueTimeISO = values.dueTime.toISOString();
+          await receivableService.createReceivable({
+            supplier: values.supplier,
+            amount: amountInWei,
+            dueTime: dueTimeISO,
+            description: values.description || '',
+            contractNumber: values.contractNumber,
+          });
+          
+          message.success('应收账款创建成功！');
+          form.resetFields();
+          setTimeout(() => navigate('/receivable/list'), 1500);
+        } catch (error: any) {
+          console.error('❌ 创建失败:', error);
+          message.error(error.message || '创建失败');
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
   };
 
   return (
@@ -48,6 +132,10 @@ function CreateReceivable() {
             form={form}
             layout="vertical"
             onFinish={handleSubmit}
+            onFinishFailed={(errorInfo) => {
+              console.error('❌ 表单验证失败:', errorInfo);
+              message.error('请检查表单填写是否完整正确');
+            }}
             style={{ marginTop: '24px' }}
           >
             <Form.Item
@@ -73,14 +161,15 @@ function CreateReceivable() {
             </Form.Item>
 
             <Form.Item
-              label="金额"
+              label="金额 (ETH)"
               name="amount"
               rules={[
                 { required: true, message: '请输入金额' },
                 { pattern: /^\d+(\.\d+)?$/, message: '请输入有效的数字' },
               ]}
+              extra="支持最多18位小数"
             >
-              <Input prefix="¥" placeholder="请输入金额" />
+              <Input suffix="ETH" placeholder="请输入金额" />
             </Form.Item>
 
             <Form.Item

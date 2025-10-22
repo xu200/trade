@@ -82,6 +82,49 @@ router.get('/applications', authenticate, financeController.list);
 
 /**
  * @swagger
+ * /api/finance/sync:
+ *   post:
+ *     summary: 同步链上融资交易到数据库
+ *     tags: [融资管理]
+ *     description: 前端MetaMask批准/拒绝交易完成后，通知后端同步状态
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - applicationId
+ *               - txHash
+ *               - action
+ *             properties:
+ *               applicationId:
+ *                 type: integer
+ *                 description: 融资申请ID
+ *                 example: 1
+ *               txHash:
+ *                 type: string
+ *                 description: 交易哈希
+ *                 example: "0x1234..."
+ *               action:
+ *                 type: string
+ *                 enum: [approve, reject]
+ *                 description: 操作类型
+ *                 example: "approve"
+ *               amount:
+ *                 type: string
+ *                 description: 融资金额（Wei字符串）
+ *                 example: "1000000000000000000"
+ *     responses:
+ *       200:
+ *         description: 同步成功
+ */
+router.post('/sync', authenticate, financeController.sync);
+
+/**
+ * @swagger
  * /api/finance/applications/{id}:
  *   get:
  *     summary: 获取融资申请详情

@@ -3,8 +3,9 @@ import { Card, Table, Button, Space, Typography, Tag, message, Modal } from 'ant
 import { CheckCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import receivableService from '@/services/receivable';
+import contractService from '@/services/contract';
+import apiService from '@/services/api';
 import type { Receivable } from '@/services/receivable';
-import { STATUS_NAMES } from '@/config/constants';
 
 const { Title, Text } = Typography;
 
@@ -21,8 +22,8 @@ function ConfirmReceivable() {
   const fetchReceivables = async () => {
     setLoading(true);
     try {
-      // 获取未确认的应收账款
-      const result = await receivableService.getReceivables({ status: 'unconfirmed' });
+      // 获取未确认的应收账款 (status=0: 待确认)
+      const result = await receivableService.getReceivables({ status: 0 });
       setReceivables(result.items);
     } catch (error) {
       console.error('获取数据失败:', error);
@@ -32,15 +33,42 @@ function ConfirmReceivable() {
   };
 
   const handleConfirm = (record: Receivable) => {
+    const ethAmount = (parseFloat(record.amount) / 1e18).toFixed(4);
+    
     Modal.confirm({
-      title: '确认应收账款',
-      content: `确定要确认金额为 ¥${record.amount} 的应收账款吗？`,
+      title: '⛓️ 确认应收账款 (MetaMask签名)',
+      content: (
+        <div>
+          <p>确定要确认金额为 <strong>{ethAmount} ETH</strong> 的应收账款吗？</p>
+          <p style={{ color: '#666', fontSize: '12px' }}>
+            ⚠️ 此操作需要MetaMask签名，将消耗少量Gas费
+          </p>
+        </div>
+      ),
+      okText: '确认并签名',
+      cancelText: '取消',
       onOk: async () => {
-        setConfirming(record.receivable_id);
+        setConfirming(record.receivableId);
         try {
-          await receivableService.confirmReceivable(record.receivable_id);
+          console.log('🔐 开始MetaMask确认流程...');
+          
+          // 1. 调用MetaMask签名并上链
+          const { txHash } = await contractService.confirmReceivable(record.receivableId);
+          
+          console.log('✅ 交易已上链:', txHash);
+          message.success('交易已提交，正在同步到后端...');
+          
+          // 2. 通知后端同步
+          await apiService.post('/receivables/sync', {
+            receivableId: record.receivableId,
+            txHash,
+            action: 'confirm'
+          });
+          
+          message.success('应收账款确认成功！');
           fetchReceivables();
         } catch (error: any) {
+          console.error('❌ 确认失败:', error);
           message.error(error.message || '确认失败');
         } finally {
           setConfirming(null);
@@ -52,40 +80,54 @@ function ConfirmReceivable() {
   const columns = [
     {
       title: 'ID',
-      dataIndex: 'receivable_id',
-      key: 'receivable_id',
+      dataIndex: 'receivableId',
+      key: 'receivableId',
       width: 80,
     },
     {
       title: '合同编号',
-      dataIndex: 'contract_number',
-      key: 'contract_number',
-      width: 120,
+      dataIndex: 'contractNumber',
+      key: 'contractNumber',
+      width: 150,
+      render: (num: string) => num || '-',
     },
     {
       title: '金额',
       dataIndex: 'amount',
       key: 'amount',
-      render: (amount: string) => `¥${parseFloat(amount).toLocaleString()}`,
+      render: (amount: string) => {
+        if (!amount) return '-';
+        const ethAmount = (parseFloat(amount) / 1e18).toFixed(4);
+        return `${ethAmount} ETH`;
+      },
     },
     {
       title: '发行方',
-      dataIndex: 'issuer_address',
-      key: 'issuer_address',
-      render: (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`,
+      dataIndex: 'issuer',
+      key: 'issuer',
+      render: (addr: string) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '-',
     },
     {
       title: '到期日期',
-      dataIndex: 'due_time',
-      key: 'due_time',
+      dataIndex: 'dueTime',
+      key: 'dueTime',
+      render: (time: string) => {
+        if (!time) return '-';
+        return new Date(time).toLocaleDateString('zh-CN');
+      },
     },
     {
       title: '状态',
       key: 'status',
-      render: (record: Receivable) => {
-        const statusText = record.financed ? '已融资' : record.confirmed ? '已确认' : '待确认';
-        const statusColor = record.financed ? 'success' : record.confirmed ? 'processing' : 'default';
-        return <Tag color={statusColor}>{statusText}</Tag>;
+      render: (_: any, record: Receivable) => {
+        const statusMap: Record<number, { color: string; text: string }> = {
+          0: { color: 'warning', text: '待确认' },
+          1: { color: 'processing', text: '已确认' },
+          2: { color: 'blue', text: '已转让' },
+          3: { color: 'success', text: '已融资' },
+        };
+        const config = statusMap[record.status] || { color: 'default', text: '未知' };
+        return <Tag color={config.color}>{config.text}</Tag>;
       },
     },
     {
@@ -96,10 +138,10 @@ function ConfirmReceivable() {
           type="primary"
           icon={<CheckCircleOutlined />}
           onClick={() => handleConfirm(record)}
-          loading={confirming === record.receivable_id}
-          disabled={record.confirmed}
+          loading={confirming === record.receivableId}
+          disabled={record.status !== 0}
         >
-          {record.confirmed ? '已确认' : '确认'}
+          {record.status === 0 ? '⛓️ MetaMask确认' : '已确认'}
         </Button>
       ),
     },
@@ -123,7 +165,7 @@ function ConfirmReceivable() {
             columns={columns}
             dataSource={receivables}
             loading={loading}
-            rowKey="receivable_id"
+            rowKey="receivableId"
             pagination={{ pageSize: 10 }}
           />
         </Card>

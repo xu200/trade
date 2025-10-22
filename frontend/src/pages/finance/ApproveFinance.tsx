@@ -3,6 +3,8 @@ import { Card, Table, Button, Space, Typography, Tag, Modal, message } from 'ant
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import financeService from '@/services/finance';
+import contractService from '@/services/contract';
+import apiService from '@/services/api';
 import type { FinanceApplication } from '@/services/finance';
 
 const { Title, Text } = Typography;
@@ -42,15 +44,52 @@ function ApproveFinance() {
   };
 
   const handleApprove = (record: FinanceApplication) => {
+    const ethAmount = (parseFloat(record.applyAmount) / 1e18).toFixed(4);
+    
     Modal.confirm({
-      title: '批准融资申请',
-      content: `确定要批准金额为 ¥${record.applyAmount} 的融资申请吗？`,
+      title: '💰 批准融资申请 (MetaMask转账ETH)',
+      content: (
+        <div>
+          <p>确定要批准这笔融资申请吗？</p>
+          <p style={{ fontSize: '16px', fontWeight: 'bold', color: '#1890ff' }}>
+            转账金额: {ethAmount} ETH
+          </p>
+          <p style={{ color: '#666', fontSize: '12px' }}>
+            ⚠️ 批准后将通过MetaMask转账 <strong>{ethAmount} ETH</strong> 给供应商
+          </p>
+          <p style={{ color: '#666', fontSize: '12px' }}>
+            💡 您将成为该应收账款的新持有人，到期时可获得本金+利息
+          </p>
+        </div>
+      ),
+      okText: '确认批准并转账',
+      cancelText: '取消',
       onOk: async () => {
         setProcessing(record.applicationId);
         try {
-          await financeService.approveFinance(record.applicationId);
+          console.log('💰 开始MetaMask批准+转账流程...');
+          
+          // 1. 调用MetaMask签名并转账ETH给供应商
+          const { txHash } = await contractService.approveFinanceApplication(
+            record.applicationId,
+            record.applyAmount  // Wei字符串
+          );
+          
+          console.log('✅ 交易已上链:', txHash);
+          message.success(`已转账 ${ethAmount} ETH，正在同步到后端...`);
+          
+          // 2. 通知后端同步
+          await apiService.post('/finance/sync', {
+            applicationId: record.applicationId,
+            txHash,
+            action: 'approve',
+            amount: record.applyAmount
+          });
+          
+          message.success('融资批准成功！');
           fetchApplications();
         } catch (error: any) {
+          console.error('❌ 批准失败:', error);
           message.error(error.message || '批准失败');
         } finally {
           setProcessing(null);

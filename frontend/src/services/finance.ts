@@ -46,9 +46,10 @@ class FinanceService {
   async applyForFinance(data: {
     receivableId: number;
     financier: string;
-    financeAmount: number;
-    interestRate: number;
+    financeAmount: string;  // ✅ Wei字符串
+    interestRate: number;   // ✅ 利率（整数，例如1000表示10%）
   }): Promise<any> {
+    console.log('📤 申请融资参数:', data);
     const response = await axios.post(`${this.baseURL}/finance/apply`, data, {
       headers: this.getHeaders(),
     });

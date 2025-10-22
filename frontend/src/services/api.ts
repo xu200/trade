@@ -91,6 +91,18 @@ class ApiService {
     console.log(response.data);
     return response.data.data as UserInfo;
   }
+
+  // 通用 POST 方法（用于同步接口等）
+  async post<T = any>(url: string, data?: any): Promise<T> {
+    const response = await this.axiosInstance.post<ApiResponse<T>>(url, data);
+    return response.data as T;
+  }
+
+  // 通用 GET 方法
+  async get<T = any>(url: string, params?: any): Promise<T> {
+    const response = await this.axiosInstance.get<ApiResponse<T>>(url, { params });
+    return response.data as T;
+  }
 }
 
 export default new ApiService();

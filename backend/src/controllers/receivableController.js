@@ -1,6 +1,7 @@
 const contractService = require('../services/contractService');
 const ReceivableIndex = require('../models/ReceivableIndex');
 const TransactionHistory = require('../models/TransactionHistory');
+const FieldMapper = require('../utils/fieldMapper');
 const { ethers } = require('ethers');
 const { Op } = require('sequelize');
 
@@ -48,16 +49,17 @@ class ReceivableController {
       const receivableId = Number(event.args[0]);
 
       // 保存到数据库
+      // ✅ amount 已经是 Wei 字符串，不需要再次转换
       const receivable = await ReceivableIndex.create({
         receivable_id: receivableId,
         issuer_address: issuerAddress,
         owner_address: supplier,
         supplier_address: supplier,
-        amount: ethers.parseEther(amount.toString()).toString(),
+        amount: amount,  // ✅ 直接使用，前端已转为Wei
         contract_number: contractNumber,
-        description: description,
+        description: description || '',
         create_time: new Date(),
-        due_time: new Date(dueTime),
+        due_time: new Date(dueTime),  // ✅ ISO字符串 -> Date对象
         confirmed: false,
         financed: false,
         settled: false,
@@ -268,36 +270,8 @@ class ReceivableController {
         order: [['created_at', 'DESC']]
       });
 
-      // 字段映射：数据库字段 -> API字段
-      const mappedItems = rows.map(row => {
-        // 计算status: 0-待确认, 1-已确认, 2-已转让, 3-已融资
-        let status = 0;
-        if (row.financed) {
-          status = 3;
-        } else if (row.confirmed) {
-          // 这里简化处理，如需区分已转让需要额外逻辑
-          status = 1;
-        }
-
-        return {
-          id: row.id,
-          receivableId: row.receivable_id,
-          issuer: row.issuer_address,
-          currentOwner: row.owner_address,
-          amount: row.amount,
-          dueTime: row.due_time,
-          description: row.description,
-          contractNumber: row.contract_number,
-          isConfirmed: row.confirmed,
-          status: status,
-          // 保留原始字段用于调试
-          _raw: {
-            confirmed: row.confirmed,
-            financed: row.financed,
-            settled: row.settled
-          }
-        };
-      });
+      // 使用统一的字段映射器
+      const mappedItems = FieldMapper.mapReceivablesToAPI(rows);
 
       res.json({
         success: true,
@@ -310,6 +284,68 @@ class ReceivableController {
         }
       });
     } catch (error) {
+      next(error);
+    }
+  }
+
+  // 同步链上交易到数据库
+  async sync(req, res, next) {
+    try {
+      const { receivableId, txHash, action, newOwner } = req.body;
+      
+      console.log('🔄 同步链上交易:', { receivableId, txHash, action });
+      
+      // 1. 从链上获取交易详情验证
+      const ethers = require('ethers');
+      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'http://127.0.0.1:8545');
+      const receipt = await provider.getTransactionReceipt(txHash);
+      
+      if (!receipt || receipt.status !== 1) {
+        return res.status(400).json({
+          success: false,
+          message: '交易失败或未确认'
+        });
+      }
+      
+      // 2. 更新数据库
+      const receivable = await ReceivableIndex.findOne({
+        where: { receivable_id: receivableId }
+      });
+      
+      if (!receivable) {
+        return res.status(404).json({
+          success: false,
+          message: '应收账款不存在'
+        });
+      }
+      
+      if (action === 'confirm') {
+        await receivable.update({ confirmed: true });
+        console.log('✅ 已更新为已确认');
+      } else if (action === 'transfer') {
+        await receivable.update({ owner_address: newOwner });
+        console.log('✅ 已更新持有人:', newOwner);
+      }
+      
+      // 3. 记录交易历史
+      await TransactionHistory.create({
+        tx_hash: txHash,
+        from_address: receipt.from,
+        to_address: receipt.to,
+        tx_type: action,
+        related_id: receivableId,
+        block_number: receipt.blockNumber,
+        gas_used: receipt.gasUsed ? receipt.gasUsed.toString() : '0',
+        timestamp: new Date(),
+        status: 'success'
+      });
+      
+      res.json({
+        success: true,
+        message: '同步成功'
+      });
+    } catch (error) {
+      console.error('❌ 同步失败:', error);
       next(error);
     }
   }
@@ -336,34 +372,8 @@ class ReceivableController {
         order: [['timestamp', 'DESC']]
       });
 
-      // 字段映射：数据库字段 -> API字段
-      let status = 0;
-      if (receivable.financed) {
-        status = 3;
-      } else if (receivable.confirmed) {
-        status = 1;
-      }
-
-      const mappedReceivable = {
-        id: receivable.id,
-        receivableId: receivable.receivable_id,
-        issuer: receivable.issuer_address,
-        currentOwner: receivable.owner_address,
-        amount: receivable.amount,
-        dueTime: receivable.due_time,
-        description: receivable.description,
-        contractNumber: receivable.contract_number,
-        isConfirmed: receivable.confirmed,
-        status: status,
-        createTime: receivable.create_time,
-        txHash: receivable.tx_hash,
-        blockNumber: receivable.block_number,
-        _raw: {
-          confirmed: receivable.confirmed,
-          financed: receivable.financed,
-          settled: receivable.settled
-        }
-      };
+      // 使用统一的字段映射器
+      const mappedReceivable = FieldMapper.mapReceivableToAPI(receivable);
 
       res.json({
         success: true,

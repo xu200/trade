@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const contractService = require('../services/contractService');
+const FieldMapper = require('../utils/fieldMapper');
 const { verifySignature } = require('../middleware/auth');
 
 class AuthController {
