@@ -268,6 +268,37 @@ class ReceivableController {
         order: [['created_at', 'DESC']]
       });
 
+      // 字段映射：数据库字段 -> API字段
+      const mappedItems = rows.map(row => {
+        // 计算status: 0-待确认, 1-已确认, 2-已转让, 3-已融资
+        let status = 0;
+        if (row.financed) {
+          status = 3;
+        } else if (row.confirmed) {
+          // 这里简化处理，如需区分已转让需要额外逻辑
+          status = 1;
+        }
+
+        return {
+          id: row.id,
+          receivableId: row.receivable_id,
+          issuer: row.issuer_address,
+          currentOwner: row.owner_address,
+          amount: row.amount,
+          dueTime: row.due_time,
+          description: row.description,
+          contractNumber: row.contract_number,
+          isConfirmed: row.confirmed,
+          status: status,
+          // 保留原始字段用于调试
+          _raw: {
+            confirmed: row.confirmed,
+            financed: row.financed,
+            settled: row.settled
+          }
+        };
+      });
+
       res.json({
         success: true,
         data: {
@@ -275,7 +306,7 @@ class ReceivableController {
           page: parseInt(page),
           pageSize: parseInt(limit),
           totalPages: Math.ceil(count / limit),
-          items: rows
+          items: mappedItems
         }
       });
     } catch (error) {
@@ -305,10 +336,39 @@ class ReceivableController {
         order: [['timestamp', 'DESC']]
       });
 
+      // 字段映射：数据库字段 -> API字段
+      let status = 0;
+      if (receivable.financed) {
+        status = 3;
+      } else if (receivable.confirmed) {
+        status = 1;
+      }
+
+      const mappedReceivable = {
+        id: receivable.id,
+        receivableId: receivable.receivable_id,
+        issuer: receivable.issuer_address,
+        currentOwner: receivable.owner_address,
+        amount: receivable.amount,
+        dueTime: receivable.due_time,
+        description: receivable.description,
+        contractNumber: receivable.contract_number,
+        isConfirmed: receivable.confirmed,
+        status: status,
+        createTime: receivable.create_time,
+        txHash: receivable.tx_hash,
+        blockNumber: receivable.block_number,
+        _raw: {
+          confirmed: receivable.confirmed,
+          financed: receivable.financed,
+          settled: receivable.settled
+        }
+      };
+
       res.json({
         success: true,
         data: {
-          receivable,
+          receivable: mappedReceivable,
           transactions
         }
       });

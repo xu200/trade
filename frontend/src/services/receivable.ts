@@ -36,23 +36,40 @@ class ReceivableService {
     status?: 0 | 1 | 2 | 3; // 0-待确认, 1-已确认, 2-已转让, 3-已融资
   }): Promise<{ items: Receivable[]; total: number; page: number; pageSize: number }> {
     try {
+      console.log('🔄 调用后端API: GET /receivables', params);
+      
       const response = await axios.get(`${this.baseURL}/receivables`, {
         headers: this.getHeaders(),
         params,
       });
       
+      console.log('📦 后端原始响应:', response.data);
+      
       if (response.data.success) {
+        // 后端返回格式: { success: true, data: { items: [...], total, page, pageSize, totalPages } }
+        const responseData = response.data.data;
+        console.log('📋 response.data.data:', responseData);
+        
+        // 提取 items 数组
+        const items = Array.isArray(responseData?.items) ? responseData.items : [];
+        const total = responseData?.total || items.length;
+        
+        console.log('✅ 提取的 items:', items);
+        console.log('✅ 总数:', total);
+        
         return {
-          items: response.data.data || [],
-          total: response.data.data.length || 0,
-          page: params?.page || 1,
-          pageSize: params?.limit || 10,
+          items,
+          total,
+          page: responseData?.page || params?.page || 1,
+          pageSize: responseData?.pageSize || params?.limit || 10,
         };
       }
       
+      console.log('⚠️ 后端返回 success=false');
       return { items: [], total: 0, page: 1, pageSize: 10 };
     } catch (error: any) {
-      console.error('获取应收账款列表失败:', error);
+      console.error('❌ 获取应收账款列表失败:', error);
+      console.error('❌ 错误详情:', error.response?.data);
       message.error(error.response?.data?.message || '获取应收账款列表失败');
       return { items: [], total: 0, page: 1, pageSize: 10 };
     }

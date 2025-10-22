@@ -27,15 +27,29 @@ function ReceivableList() {
   const fetchReceivables = async () => {
     setLoading(true);
     try {
+      console.log('📡 正在获取应收账款列表，参数:', {
+        page,
+        limit: pageSize,
+        status: (typeof statusFilter === 'number' ? statusFilter : undefined),
+      });
+      
       const result = await receivableService.getReceivables({
         page,
         limit: pageSize,
         status: (typeof statusFilter === 'number' ? statusFilter : undefined) as 0 | 1 | 2 | 3 | undefined,
       });
-      setReceivables(result.items);
-      setTotal(result.total);
+      
+      console.log('✅ 后端返回数据:', result);
+      console.log('📊 items:', result.items);
+      console.log('📈 total:', result.total);
+      
+      // 确保 items 是数组
+      setReceivables(Array.isArray(result.items) ? result.items : []);
+      setTotal(result.total || 0);
     } catch (error) {
-      console.error('获取数据失败:', error);
+      console.error('❌ 获取数据失败:', error);
+      setReceivables([]); // 出错时设置为空数组
+      setTotal(0);
     } finally {
       setLoading(false);
     }
@@ -69,29 +83,40 @@ function ReceivableList() {
       dataIndex: 'contractNumber',
       key: 'contractNumber',
       width: 150,
+      render: (num: string) => num || '-',
     },
     {
       title: '金额',
       dataIndex: 'amount',
       key: 'amount',
-      render: (amount: string) => `¥${parseFloat(amount).toLocaleString()}`,
+      render: (amount: string) => {
+        if (!amount) return '-';
+        // 将 Wei 转换为 ETH (1 ETH = 10^18 Wei)
+        const ethAmount = (parseFloat(amount) / 1e18).toFixed(4);
+        return `${ethAmount} ETH`;
+      },
     },
     {
       title: '发行方',
       dataIndex: 'issuer',
       key: 'issuer',
-      render: (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`,
+      render: (addr: string) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '-',
     },
     {
       title: '持有人',
       dataIndex: 'currentOwner',
       key: 'currentOwner',
-      render: (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`,
+      render: (addr: string) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '-',
     },
     {
       title: '到期日期',
       dataIndex: 'dueTime',
       key: 'dueTime',
+      render: (time: string) => {
+        if (!time) return '-';
+        // 格式化日期：2025-10-30
+        return new Date(time).toLocaleDateString('zh-CN');
+      },
     },
     {
       title: '状态',

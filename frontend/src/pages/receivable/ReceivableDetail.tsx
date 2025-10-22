@@ -32,12 +32,19 @@ function ReceivableDetail() {
         },
       });
       
+      console.log('📦 详情页后端响应:', response.data);
+      
       if (response.data.success) {
-        setReceivable(response.data.data);
+        // 后端返回: { success: true, data: { receivable: {...}, transactions: [...] } }
+        // 后端已经做了字段映射，直接使用
+        const receivableData = response.data.data.receivable;
+        console.log('✅ 接收到的数据:', receivableData);
+        
+        setReceivable(receivableData);
       }
     } catch (error: any) {
       message.error('获取详情失败');
-      console.error(error);
+      console.error('❌ 获取详情错误:', error);
     } finally {
       setLoading(false);
     }
@@ -92,7 +99,7 @@ function ReceivableDetail() {
               {receivable.contractNumber || '-'}
             </Descriptions.Item>
             <Descriptions.Item label="金额">
-              {receivable.amount ? `¥${parseFloat(receivable.amount).toLocaleString()}` : '-'}
+              {receivable.amount ? `${(parseFloat(receivable.amount) / 1e18).toFixed(4)} ETH` : '-'}
             </Descriptions.Item>
             <Descriptions.Item label="状态">
               {getStatusTag(receivable)}
@@ -104,7 +111,11 @@ function ReceivableDetail() {
               {receivable.currentOwner || '-'}
             </Descriptions.Item>
             <Descriptions.Item label="到期日期">
-              {receivable.dueTime || '-'}
+              {receivable.dueTime ? new Date(receivable.dueTime).toLocaleDateString('zh-CN', { 
+                year: 'numeric', 
+                month: '2-digit', 
+                day: '2-digit' 
+              }) : '-'}
             </Descriptions.Item>
             <Descriptions.Item label="描述" span={2}>
               {receivable.description || '无'}
