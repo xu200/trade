@@ -8,7 +8,7 @@ import { message } from 'antd';
 import SupplyChainFinanceABI from '@/contracts/SupplyChainFinance.json';
 
 // 从环境变量获取合约地址
-const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0';
+const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512';
 
 class ContractService {
   private provider: ethers.BrowserProvider | null = null;
@@ -26,6 +26,45 @@ class ContractService {
       // 创建 Provider
       this.provider = new ethers.BrowserProvider(window.ethereum);
       
+      // 🔧 检查当前网络
+      const network = await this.provider.getNetwork();
+      const chainId = Number(network.chainId);
+      
+      // Hardhat本地网络的链ID（与hardhat.config.js保持一致）
+      const HARDHAT_CHAIN_ID = 31337;
+      const HARDHAT_CHAIN_ID_HEX = '0x7a69'; // 31337的十六进制
+      
+      console.log('🔍 当前MetaMask网络:', {
+        name: network.name,
+        chainId: chainId,
+        expectedChainId: HARDHAT_CHAIN_ID
+      });
+      
+      // 🔧 如果不是Hardhat网络（链ID 7788），尝试切换
+      if (chainId !== HARDHAT_CHAIN_ID) {
+        console.warn('⚠️ 当前不是Hardhat网络，尝试切换...');
+        
+        try {
+          // 请求切换到Hardhat网络
+          await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: HARDHAT_CHAIN_ID_HEX }],
+          });
+          
+          console.log('✅ 已切换到Hardhat网络');
+          
+          // 重新创建provider以获取新的网络连接
+          this.provider = new ethers.BrowserProvider(window.ethereum);
+        } catch (switchError: any) {
+          // 如果网络不存在，提示用户添加
+          if (switchError.code === 4902) {
+            console.error('❌ Hardhat网络未配置，请手动添加');
+            throw new Error(`请在MetaMask中添加Hardhat网络（链ID: ${HARDHAT_CHAIN_ID}, RPC: http://localhost:8545）`);
+          }
+          throw switchError;
+        }
+      }
+      
       // 获取 Signer (用户账户)
       const signer = await this.provider.getSigner();
       
@@ -38,7 +77,9 @@ class ContractService {
 
       console.log('✅ 合约服务初始化成功:', {
         contractAddress: CONTRACT_ADDRESS,
-        userAddress: await signer.getAddress()
+        userAddress: await signer.getAddress(),
+        network: network.name,
+        chainId: chainId
       });
     } catch (error: any) {
       console.error('❌ 合约服务初始化失败:', error);
@@ -66,7 +107,16 @@ class ContractService {
       
       message.loading({ content: '正在发送交易...', key: 'confirm', duration: 0 });
       
-      const tx = await this.contract!.confirmReceivable(receivableId);
+      // 🔧 手动设置gas参数
+      const rpcProvider = new ethers.JsonRpcProvider('http://localhost:8545');
+      const txParams = {
+        gasLimit: 300000n,
+        gasPrice: await rpcProvider.getFeeData().then(fee => fee.gasPrice || 0n)
+      };
+      
+      console.log('📤 确认应收账款，gas参数:', txParams);
+      
+      const tx = await this.contract!.confirmReceivable(receivableId, txParams);
       
       message.loading({ content: '等待交易确认...', key: 'confirm', duration: 0 });
       
@@ -114,7 +164,16 @@ class ContractService {
       
       message.loading({ content: '正在发送交易...', key: 'transfer', duration: 0 });
       
-      const tx = await this.contract!.transferReceivable(receivableId, newOwner);
+      // 🔧 手动设置gas参数
+      const rpcProvider = new ethers.JsonRpcProvider('http://localhost:8545');
+      const txParams = {
+        gasLimit: 300000n,
+        gasPrice: await rpcProvider.getFeeData().then(fee => fee.gasPrice || 0n)
+      };
+      
+      console.log('📤 转让应收账款，gas参数:', txParams);
+      
+      const tx = await this.contract!.transferReceivable(receivableId, newOwner, txParams);
       
       message.loading({ content: '等待交易确认...', key: 'transfer', duration: 0 });
       
@@ -157,6 +216,7 @@ class ContractService {
       await this.ensureInit();
       
       const ethAmount = ethers.formatEther(financeAmountInWei);
+      const amountWei = BigInt(financeAmountInWei);
       
       message.loading({ 
         content: `正在批准融资并转账 ${ethAmount} ETH...`, 
@@ -164,10 +224,34 @@ class ContractService {
         duration: 0 
       });
       
-      // ⭐ 重点：批准融资时需要转账 ETH
-      const tx = await this.contract!.approveFinanceApplication(appId, true, {
-        value: financeAmountInWei  // 转账金额
+      // 🔧 查询真实余额
+      const rpcProvider = new ethers.JsonRpcProvider('http://localhost:8545');
+      const signer = await this.provider!.getSigner();
+      const userAddress = await signer.getAddress();
+      const realBalance = await rpcProvider.getBalance(userAddress);
+      
+      console.log('🔍 批准融资余额检查:', {
+        address: userAddress,
+        balance: ethers.formatEther(realBalance) + ' ETH',
+        required: ethAmount + ' ETH',
+        sufficient: realBalance >= amountWei
       });
+      
+      if (realBalance < amountWei) {
+        throw new Error(`余额不足！当前余额: ${ethers.formatEther(realBalance)} ETH，需要: ${ethAmount} ETH`);
+      }
+      
+      // 🔧 手动设置gas参数
+      const txParams = {
+        value: amountWei,
+        gasLimit: 500000n,
+        gasPrice: await rpcProvider.getFeeData().then(fee => fee.gasPrice || 0n)
+      };
+      
+      console.log('📤 批准融资，gas参数:', txParams);
+      
+      // ⭐ 重点：批准融资时需要转账 ETH
+      const tx = await this.contract!.approveFinanceApplication(appId, true, txParams);
       
       message.loading({ content: '等待交易确认...', key: 'approve', duration: 0 });
       
@@ -214,7 +298,16 @@ class ContractService {
       
       message.loading({ content: '正在拒绝融资申请...', key: 'reject', duration: 0 });
       
-      const tx = await this.contract!.approveFinanceApplication(appId, false);
+      // 🔧 手动设置gas参数
+      const rpcProvider = new ethers.JsonRpcProvider('http://localhost:8545');
+      const txParams = {
+        gasLimit: 300000n,
+        gasPrice: await rpcProvider.getFeeData().then(fee => fee.gasPrice || 0n)
+      };
+      
+      console.log('📤 拒绝融资，gas参数:', txParams);
+      
+      const tx = await this.contract!.approveFinanceApplication(appId, false, txParams);
       
       message.loading({ content: '等待交易确认...', key: 'reject', duration: 0 });
       
@@ -277,6 +370,34 @@ class ContractService {
         contractNumber
       });
       
+      // 🔧 新方法：使用独立的JsonRpcProvider查询真实余额
+      const rpcProvider = new ethers.JsonRpcProvider('http://localhost:8545');
+      const signer = await this.provider!.getSigner();
+      const userAddress = await signer.getAddress();
+      
+      // 查询真实余额
+      const realBalance = await rpcProvider.getBalance(userAddress);
+      console.log('🔍 真实余额检查:', {
+        address: userAddress,
+        balance: ethers.formatEther(realBalance) + ' ETH',
+        required: ethAmount + ' ETH',
+        sufficient: realBalance >= amountWei
+      });
+      
+      if (realBalance < amountWei) {
+        throw new Error(`余额不足！当前余额: ${ethers.formatEther(realBalance)} ETH，需要: ${ethAmount} ETH`);
+      }
+      
+      // ⭐ 手动设置gas参数，绕过estimateGas
+      console.log('⚙️ 准备交易参数（手动设置gas）...');
+      const txParams = {
+        value: amountWei,
+        gasLimit: 500000n,  // 手动设置足够的gas limit
+        gasPrice: await rpcProvider.getFeeData().then(fee => fee.gasPrice || 0n)
+      };
+      
+      console.log('📤 发送交易到MetaMask...', txParams);
+      
       // ⭐ 核心企业必须锁定ETH
       const tx = await this.contract!.createReceivable(
         supplier,
@@ -284,7 +405,7 @@ class ContractService {
         dueTime,
         description,
         contractNumber,
-        { value: amountWei }  // 锁定ETH
+        txParams
       );
       
       message.loading({ content: '等待交易确认...', key: 'create', duration: 0 });
