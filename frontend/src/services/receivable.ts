@@ -75,13 +75,14 @@ class ReceivableService {
     }
   }
 
-  // 创建应收账款（匹配后端参数）
+  // 创建应收账款（前端已调用MetaMask，传递txHash给后端）
   async createReceivable(data: {
     supplier: string;      // 供应商地址
-    amount: string;        // 金额
-    dueTime: string;       // 到期时间
+    amount: string;        // 金额（Wei）
+    dueTime: string;       // 到期时间（ISO字符串）
     description?: string;  // 描述
     contractNumber: string; // 合同编号
+    txHash?: string;       // 交易哈希（前端调用MetaMask后获得）
   }): Promise<any> {
     try {
       const response = await axios.post(`${this.baseURL}/receivables`, data, {

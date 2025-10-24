@@ -31,6 +31,16 @@ class FinanceController {
         });
       }
 
+      console.log('📤 调用智能合约申请融资:', {
+        receivableId,
+        financier,
+        financeAmount,
+        interestRate,
+        applicant: userAddress,
+        receivableOwner: receivable.owner_address,
+        receivableConfirmed: receivable.confirmed
+      });
+
       // 调用智能合约（使用申请人的地址）
       const receipt = await contractService.applyForFinance(
         receivableId,
@@ -40,11 +50,31 @@ class FinanceController {
         userAddress  // 传入申请人地址
       );
 
-      // 从事件中获取申请ID
-      const event = receipt.logs.find(log => 
-        log.fragment && log.fragment.name === 'FinanceApplicationSubmitted'
-      );
-      const appId = Number(event.args[0]);
+      console.log('🔍 融资申请 - 交易回执:', receipt);
+      console.log('🔍 融资申请 - 交易哈希:', receipt.hash);
+      console.log('🔍 融资申请 - 日志数量:', receipt.logs?.length);
+
+      // 从事件中获取申请ID（ethers v6 正确解析方式）
+      let appId;
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = contractService.contract.interface.parseLog({
+            topics: log.topics,
+            data: log.data
+          });
+          if (parsedLog && parsedLog.name === 'FinanceApplicationSubmitted') {
+            appId = Number(parsedLog.args[0]);
+            console.log('✅ 找到 FinanceApplicationSubmitted 事件，appId:', appId);
+            break;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+      
+      if (!appId) {
+        throw new Error('无法从交易回执中找到FinanceApplicationSubmitted事件');
+      }
 
       // 保存到数据库
       const application = await FinanceAppIndex.create({
@@ -52,8 +82,8 @@ class FinanceController {
         receivable_id: receivableId,
         applicant_address: userAddress,
         financier_address: financier,
-        finance_amount: ethers.parseEther(financeAmount.toString()).toString(),
-        interest_rate: interestRate,
+        finance_amount: financeAmount,  // ✅ 前端已经转为Wei字符串
+        interest_rate: interestRate,  // ✅ 前端已经转为整数（1000 = 10%）
         apply_time: new Date(),
         approved: false,
         processed: false,

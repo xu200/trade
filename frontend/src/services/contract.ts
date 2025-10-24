@@ -8,7 +8,7 @@ import { message } from 'antd';
 import SupplyChainFinanceABI from '@/contracts/SupplyChainFinance.json';
 
 // 从环境变量获取合约地址
-const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512';
+const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x5FbDB2315678afecb367f032d93F642f64180aa3';
 
 class ContractService {
   private provider: ethers.BrowserProvider | null = null;
@@ -259,11 +259,18 @@ class ContractService {
       
       message.destroy('approve');
       
+      // 🔧 检查交易状态
+      if (receipt.status === 0) {
+        console.error('❌ 交易执行失败:', receipt);
+        throw new Error('交易已上链但执行失败，请检查合约调用条件');
+      }
+      
       console.log('✅ 批准融资成功:', {
         appId,
         amount: ethAmount + ' ETH',
         txHash: receipt.hash,
-        blockNumber: receipt.blockNumber
+        blockNumber: receipt.blockNumber,
+        status: receipt.status
       });
       
       return {
@@ -433,6 +440,61 @@ class ContractService {
       }
       
       throw new Error('创建失败: ' + (error.reason || error.message));
+    }
+  }
+
+  /**
+   * 在链上注册用户
+   * @param role 用户角色：0-NONE, 1-CORE_COMPANY, 2-SUPPLIER, 3-FINANCIER
+   * @param name 用户名称
+   */
+  async registerUser(role: number, name: string): Promise<{ txHash: string; blockNumber: number }> {
+    try {
+      await this.ensureInit();
+      
+      console.log('📝 链上注册用户:', { role, name });
+      
+      // 直接发送交易（不估算gas）
+      const txParams = {
+        gasLimit: 100000n,
+        gasPrice: await this.provider!.send('eth_gasPrice', []).then(p => BigInt(p))
+      };
+      
+      const tx = await this.contract!.registerUser(role, name, txParams);
+      console.log('📤 注册交易已发送:', tx.hash);
+      
+      const receipt = await tx.wait();
+      console.log('✅ 链上注册成功:', receipt);
+      
+      return {
+        txHash: receipt.hash,
+        blockNumber: receipt.blockNumber
+      };
+    } catch (error: any) {
+      console.error('❌ 链上注册失败:', error);
+      
+      // 如果已经注册过，返回成功
+      if (error.message?.includes('Already registered')) {
+        console.log('ℹ️ 用户已在链上注册');
+        return { txHash: '', blockNumber: 0 };
+      }
+      
+      throw new Error('链上注册失败: ' + (error.reason || error.message));
+    }
+  }
+
+  /**
+   * 检查用户是否已在链上注册
+   * @param address 用户地址
+   */
+  async checkUserRole(address: string): Promise<number> {
+    try {
+      await this.ensureInit();
+      const role = await this.contract!.userRoles(address);
+      return Number(role);
+    } catch (error) {
+      console.error('❌ 查询用户角色失败:', error);
+      return 0; // NONE
     }
   }
 

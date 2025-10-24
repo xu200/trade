@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, Typography, Tag, message, Modal } from 'antd';
+import { Card, Table, Button, Space, Typography, Tag, message, App } from 'antd';
 import { CheckCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import receivableService from '@/services/receivable';
@@ -11,6 +11,7 @@ const { Title, Text } = Typography;
 
 function ConfirmReceivable() {
   const navigate = useNavigate();
+  const { modal } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [receivables, setReceivables] = useState<Receivable[]>([]);
   const [confirming, setConfirming] = useState<number | null>(null);
@@ -32,10 +33,38 @@ function ConfirmReceivable() {
     }
   };
 
-  const handleConfirm = (record: Receivable) => {
+  const handleConfirm = async (record: Receivable) => {
     const ethAmount = (parseFloat(record.amount) / 1e18).toFixed(4);
     
-    Modal.confirm({
+    // 🔧 先检查用户是否已在链上注册
+    try {
+      const currentAddress = await contractService.getCurrentAccount();
+      const role = await contractService.checkUserRole(currentAddress);
+      
+      console.log('🔍 检查供应商角色:', { address: currentAddress, role });
+      
+      if (role === 0) {
+        // 未注册，先注册为供应商（role = 2）
+        message.info('首次使用，正在链上注册账户...');
+        console.log('📝 首次使用，需要先在链上注册为供应商');
+        
+        try {
+          await contractService.registerUser(2, 'Supplier');
+          message.success('链上注册成功！');
+          console.log('✅ 供应商链上注册成功');
+        } catch (regError: any) {
+          console.error('❌ 链上注册失败:', regError);
+          message.error('链上注册失败: ' + regError.message);
+          return;
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ 检查角色失败:', error);
+      message.error('检查账户状态失败');
+      return;
+    }
+    
+    modal.confirm({
       title: '⛓️ 确认应收账款 (MetaMask签名)',
       content: (
         <div>

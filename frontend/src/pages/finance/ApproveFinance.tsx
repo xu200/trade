@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, Typography, Tag, Modal, message } from 'antd';
+import { Card, Table, Button, Space, Typography, Tag, App, message } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import financeService from '@/services/finance';
@@ -23,6 +23,7 @@ const STATUS_NAMES = {
 
 function ApproveFinance() {
   const navigate = useNavigate();
+  const { modal } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [applications, setApplications] = useState<FinanceApplication[]>([]);
   const [processing, setProcessing] = useState<number | null>(null);
@@ -35,7 +36,13 @@ function ApproveFinance() {
     setLoading(true);
     try {
       const result = await financeService.getApplications();
-      setApplications(result.data);
+      console.log('📊 融资申请列表响应:', result);
+      
+      // financeService 返回格式：{ items: [...], total, page, pageSize }
+      // 直接使用 items 数组
+      const applications = result.items || [];
+      console.log('📋 融资申请列表:', applications);
+      setApplications(applications);
     } catch (error) {
       console.error('获取数据失败:', error);
     } finally {
@@ -43,10 +50,38 @@ function ApproveFinance() {
     }
   };
 
-  const handleApprove = (record: FinanceApplication) => {
-    const ethAmount = (parseFloat(record.applyAmount) / 1e18).toFixed(4);
+  const handleApprove = async (record: any) => {
+    const ethAmount = (parseFloat(record.finance_amount) / 1e18).toFixed(4);
     
-    Modal.confirm({
+    // 🔧 先检查用户是否已在链上注册
+    try {
+      const currentAddress = await contractService.getCurrentAccount();
+      const role = await contractService.checkUserRole(currentAddress);
+      
+      console.log('🔍 检查金融机构角色:', { address: currentAddress, role });
+      
+      if (role === 0) {
+        // 未注册，先注册为金融机构（role = 3）
+        message.info('首次使用，正在链上注册账户...');
+        console.log('📝 首次使用，需要先在链上注册为金融机构');
+        
+        try {
+          await contractService.registerUser(3, 'Financier');
+          message.success('链上注册成功！');
+          console.log('✅ 金融机构链上注册成功');
+        } catch (regError: any) {
+          console.error('❌ 链上注册失败:', regError);
+          message.error('链上注册失败: ' + regError.message);
+          return;
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ 检查角色失败:', error);
+      message.error('检查账户状态失败');
+      return;
+    }
+    
+    modal.confirm({
       title: '💰 批准融资申请 (MetaMask转账ETH)',
       content: (
         <div>
@@ -65,14 +100,14 @@ function ApproveFinance() {
       okText: '确认批准并转账',
       cancelText: '取消',
       onOk: async () => {
-        setProcessing(record.applicationId);
+        setProcessing(record.application_id);
         try {
           console.log('💰 开始MetaMask批准+转账流程...');
           
           // 1. 调用MetaMask签名并转账ETH给供应商
           const { txHash } = await contractService.approveFinanceApplication(
-            record.applicationId,
-            record.applyAmount  // Wei字符串
+            record.application_id,
+            record.finance_amount  // Wei字符串
           );
           
           console.log('✅ 交易已上链:', txHash);
@@ -80,10 +115,10 @@ function ApproveFinance() {
           
           // 2. 通知后端同步
           await apiService.post('/finance/sync', {
-            applicationId: record.applicationId,
+            applicationId: record.application_id,
             txHash,
             action: 'approve',
-            amount: record.applyAmount
+            amount: record.finance_amount
           });
           
           message.success('融资批准成功！');
@@ -98,16 +133,36 @@ function ApproveFinance() {
     });
   };
 
-  const handleReject = (record: FinanceApplication) => {
-    Modal.confirm({
+  const handleReject = async (record: FinanceApplication) => {
+    // 🔧 先检查用户是否已在链上注册
+    try {
+      const currentAddress = await contractService.getCurrentAccount();
+      const role = await contractService.checkUserRole(currentAddress);
+      
+      if (role === 0) {
+        message.info('首次使用，正在链上注册账户...');
+        try {
+          await contractService.registerUser(3, 'Financier');
+          message.success('链上注册成功！');
+        } catch (regError: any) {
+          message.error('链上注册失败: ' + regError.message);
+          return;
+        }
+      }
+    } catch (error: any) {
+      message.error('检查账户状态失败');
+      return;
+    }
+    
+    modal.confirm({
       title: '拒绝融资申请',
       content: `确定要拒绝这笔融资申请吗？`,
       okText: '确认拒绝',
       okType: 'danger',
       onOk: async () => {
-        setProcessing(record.applicationId);
+        setProcessing(record.application_id);
         try {
-          await financeService.rejectFinance(record.applicationId);
+          await financeService.rejectFinance(record.application_id);
           fetchApplications();
         } catch (error: any) {
           message.error(error.message || '拒绝失败');
@@ -121,55 +176,72 @@ function ApproveFinance() {
   const columns = [
     {
       title: '申请ID',
-      dataIndex: 'applicationId',
-      key: 'applicationId',
+      dataIndex: 'application_id',
+      key: 'application_id',
       width: 100,
     },
     {
       title: '应收账款ID',
-      dataIndex: 'receivableId',
-      key: 'receivableId',
+      dataIndex: 'receivable_id',
+      key: 'receivable_id',
       width: 120,
     },
     {
       title: '申请金额',
-      dataIndex: 'applyAmount',
-      key: 'applyAmount',
-      render: (amount: string) => `¥${parseFloat(amount).toLocaleString()}`,
+      dataIndex: 'finance_amount',
+      key: 'finance_amount',
+      render: (amount: string) => {
+        if (!amount) return '-';
+        const ethAmount = (parseFloat(amount) / 1e18).toFixed(4);
+        return `${ethAmount} ETH`;
+      },
     },
     {
       title: '申请人',
-      dataIndex: 'applicantAddress',
-      key: 'applicantAddress',
-      render: (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`,
+      dataIndex: 'applicant_address',
+      key: 'applicant_address',
+      render: (addr: string) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '-',
     },
     {
       title: '申请日期',
-      dataIndex: 'applyDate',
-      key: 'applyDate',
+      dataIndex: 'apply_time',
+      key: 'apply_time',
+      render: (time: string) => {
+        if (!time) return '-';
+        return new Date(time).toLocaleDateString('zh-CN');
+      },
     },
     {
       title: '状态',
-      dataIndex: 'status',
       key: 'status',
-      render: (status: string) => (
-        <Tag color={STATUS_COLORS[status as keyof typeof STATUS_COLORS]}>
-          {STATUS_NAMES[status as keyof typeof STATUS_NAMES]}
-        </Tag>
-      ),
+      render: (_: any, record: any) => {
+        let status: string;
+        if (!record.processed) {
+          status = 'Pending';
+        } else if (record.approved) {
+          status = 'Approved';
+        } else {
+          status = 'Rejected';
+        }
+        return (
+          <Tag color={STATUS_COLORS[status as keyof typeof STATUS_COLORS]}>
+            {STATUS_NAMES[status as keyof typeof STATUS_NAMES]}
+          </Tag>
+        );
+      },
     },
     {
       title: '操作',
       key: 'action',
-      render: (_: any, record: FinanceApplication) =>
-        record.status === 'Pending' ? (
+      render: (_: any, record: any) =>
+        !record.processed ? (
           <Space>
             <Button
               type="primary"
               size="small"
               icon={<CheckCircleOutlined />}
               onClick={() => handleApprove(record)}
-              loading={processing === record.applicationId}
+              loading={processing === record.application_id}
             >
               批准
             </Button>
@@ -178,7 +250,7 @@ function ApproveFinance() {
               size="small"
               icon={<CloseCircleOutlined />}
               onClick={() => handleReject(record)}
-              loading={processing === record.applicationId}
+              loading={processing === record.application_id}
             >
               拒绝
             </Button>
@@ -207,7 +279,7 @@ function ApproveFinance() {
             columns={columns}
             dataSource={applications}
             loading={loading}
-            rowKey="applicationId"
+            rowKey="application_id"
             pagination={{ pageSize: 10 }}
           />
         </Card>

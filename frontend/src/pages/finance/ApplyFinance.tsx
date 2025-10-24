@@ -6,7 +6,6 @@ import { ethers } from 'ethers';
 import receivableService from '@/services/receivable';
 import type { Receivable } from '@/services/receivable';
 import financeService from '@/services/finance';
-import { STATUS_NAMES } from '@/config/constants';
 
 const { Title, Text } = Typography;
 
@@ -42,8 +41,10 @@ function ApplyFinance() {
     setSelectedReceivable(record);
     setModalVisible(true);
     form.resetFields();
+    // 将Wei转换为ETH显示
+    const ethAmount = record.amount ? (parseFloat(record.amount) / 1e18).toFixed(4) : '0';
     form.setFieldsValue({
-      applyAmount: record.amount,
+      financeAmount: ethAmount,  // 默认申请金额等于应收账款金额
     });
   };
 
@@ -93,26 +94,41 @@ function ApplyFinance() {
       title: '金额',
       dataIndex: 'amount',
       key: 'amount',
-      render: (amount: string) => `¥${parseFloat(amount).toLocaleString()}`,
+      render: (amount: string) => {
+        if (!amount) return '-';
+        const ethAmount = (parseFloat(amount) / 1e18).toFixed(4);
+        return `${ethAmount} ETH`;
+      },
     },
     {
       title: '发行方',
-      dataIndex: 'issuerAddress',
-      key: 'issuerAddress',
-      render: (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`,
+      dataIndex: 'issuer',
+      key: 'issuer',
+      render: (addr: string) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '-',
     },
     {
       title: '到期日期',
-      dataIndex: 'dueDate',
-      key: 'dueDate',
+      dataIndex: 'dueTime',
+      key: 'dueTime',
+      render: (time: string) => {
+        if (!time) return '-';
+        return new Date(time).toLocaleDateString('zh-CN');
+      },
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => (
-        <Tag color="success">{STATUS_NAMES[status as keyof typeof STATUS_NAMES]}</Tag>
-      ),
+      render: (status: number) => {
+        const statusMap: Record<number, { color: string; text: string }> = {
+          0: { color: 'warning', text: '待确认' },
+          1: { color: 'processing', text: '已确认' },
+          2: { color: 'blue', text: '已转让' },
+          3: { color: 'success', text: '已融资' },
+        };
+        const config = statusMap[status] || { color: 'default', text: '未知' };
+        return <Tag color={config.color}>{config.text}</Tag>;
+      },
     },
     {
       title: '操作',

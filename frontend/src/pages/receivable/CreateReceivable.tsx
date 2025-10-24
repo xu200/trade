@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card, Form, Input, DatePicker, Button, Space, Typography, message, Modal, App } from 'antd';
+import { Card, Form, Input, DatePicker, Button, Space, Typography, message, App } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { ethers } from 'ethers';
 import receivableService from '@/services/receivable';
@@ -73,6 +73,29 @@ function CreateReceivable() {
         console.log('✅ 用户点击了确认按钮');
         setLoading(true);
         try {
+          // 0. 检查用户是否已在链上注册
+          const currentAddress = await contractService.getCurrentAccount();
+          const role = await contractService.checkUserRole(currentAddress);
+          
+          console.log('🔍 检查用户角色:', { address: currentAddress, role });
+          
+          if (role === 0) {
+            // 用户未注册，先注册为核心企业（role = 1）
+            message.info('首次使用，正在链上注册账户...');
+            console.log('📝 首次使用，需要先在链上注册为核心企业');
+            
+            try {
+              await contractService.registerUser(1, 'Core Company');
+              message.success('链上注册成功！');
+              console.log('✅ 链上注册成功');
+            } catch (regError: any) {
+              console.error('❌ 链上注册失败:', regError);
+              message.error('链上注册失败: ' + regError.message);
+              setLoading(false);
+              return;
+            }
+          }
+          
           console.log('⛓️ 开始MetaMask创建+锁定ETH流程...');
           console.log('📤 调用参数:', {
             supplier: values.supplier,
@@ -94,7 +117,7 @@ function CreateReceivable() {
           console.log('✅ 交易已上链:', txHash);
           message.success(`已锁定 ${ethAmount} ETH，正在同步到后端...`);
           
-          // 2. 通知后端同步（暂时使用原有API创建数据库记录）
+          // 2. 通知后端同步（传递txHash，后端从链上查询数据）
           const dueTimeISO = values.dueTime.toISOString();
           await receivableService.createReceivable({
             supplier: values.supplier,
@@ -102,6 +125,7 @@ function CreateReceivable() {
             dueTime: dueTimeISO,
             description: values.description || '',
             contractNumber: values.contractNumber,
+            txHash: txHash,  // ✅ 传递交易哈希
           });
           
           message.success('应收账款创建成功！');

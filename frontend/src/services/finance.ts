@@ -29,13 +29,16 @@ class FinanceService {
   }
 
   // 获取融资申请列表
-  async getApplications(params?: any): Promise<{ data: FinanceApplication[]; total: number }> {
+  async getApplications(params?: any): Promise<{ data: FinanceApplication[]; total: number; items?: any[] }> {
     try {
       const response = await axios.get(`${this.baseURL}/finance/applications`, {
         headers: this.getHeaders(),
         params,
       });
-      return response.data.data || { data: [], total: 0 };
+      // 后端返回格式：{ success: true, data: { items: [...], total, page, pageSize } }
+      const result = response.data.data || { items: [], total: 0 };
+      console.log('📊 finance.ts - 原始响应:', result);
+      return result;
     } catch (error) {
       console.error('获取融资申请列表失败:', error);
       return { data: [], total: 0 };

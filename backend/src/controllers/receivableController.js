@@ -6,10 +6,10 @@ const { ethers } = require('ethers');
 const { Op } = require('sequelize');
 
 class ReceivableController {
-  // 创建应收账款
+  // 创建应收账款（前端已调用MetaMask，这里只负责保存数据库记录）
   async create(req, res, next) {
     try {
-      const { supplier, amount, dueTime, description, contractNumber } = req.body;
+      const { supplier, amount, dueTime, description, contractNumber, txHash } = req.body;
       const issuerAddress = req.user.address;
 
       // 权限检查
@@ -32,21 +32,52 @@ class ReceivableController {
         });
       }
 
-      // 调用智能合约（使用当前用户的地址）
-      const receipt = await contractService.createReceivable(
-        supplier,
-        amount,
-        dueTime,
-        description,
-        contractNumber,
-        issuerAddress  // 传入发行人地址
-      );
+      // 🔧 从链上查询交易回执（前端已经通过MetaMask提交了交易）
+      if (!txHash) {
+        throw new Error('缺少交易哈希（txHash）');
+      }
+
+      const provider = contractService.contract.runner.provider;
+      const receipt = await provider.getTransactionReceipt(txHash);
+      
+      console.log('🔍 调试信息 - txHash:', txHash);
+      console.log('🔍 调试信息 - receipt:', receipt);
+      
+      if (!receipt) {
+        throw new Error('交易回执不存在，请等待交易确认');
+      }
+
+      console.log('🔍 调试信息 - receipt.logs 数量:', receipt.logs?.length);
+      console.log('🔍 调试信息 - receipt.logs:', JSON.stringify(receipt.logs, null, 2));
 
       // 从事件中获取应收账款ID
-      const event = receipt.logs.find(log => 
-        log.fragment && log.fragment.name === 'ReceivableCreated'
-      );
-      const receivableId = Number(event.args[0]);
+      let receivableId;
+      for (const log of receipt.logs) {
+        console.log('🔍 尝试解析 log:', log);
+        try {
+          const parsedLog = contractService.contract.interface.parseLog({
+            topics: log.topics,
+            data: log.data
+          });
+          console.log('✅ 解析成功:', parsedLog);
+          if (parsedLog && parsedLog.name === 'ReceivableCreated') {
+            receivableId = Number(parsedLog.args[0]);
+            console.log('✅ 找到 ReceivableCreated 事件，ID:', receivableId);
+            break;
+          }
+        } catch (e) {
+          console.log('⚠️ 无法解析此 log:', e.message);
+          // 跳过无法解析的日志
+          continue;
+        }
+      }
+      
+      if (!receivableId) {
+        console.error('❌ 未找到 ReceivableCreated 事件');
+        console.error('❌ 合约地址:', contractService.contract.target);
+        console.error('❌ 合约ABI事件:', contractService.contract.interface.fragments.filter(f => f.type === 'event').map(e => e.name));
+        throw new Error('无法从交易回执中找到ReceivableCreated事件');
+      }
 
       // 保存到数据库
       // ✅ amount 已经是 Wei 字符串，不需要再次转换
